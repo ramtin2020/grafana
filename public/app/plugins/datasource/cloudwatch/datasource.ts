@@ -38,6 +38,7 @@ import {
   MetricQuery,
   MetricRequest,
   TSDBResponse,
+  isCloudWatchLogsQuery,
 } from './types';
 import { empty, from, Observable, of, merge } from 'rxjs';
 import { catchError, delay, expand, finalize, map, mergeMap, tap } from 'rxjs/operators';
@@ -912,12 +913,12 @@ export class CloudWatchDatasource extends DataSourceApi<CloudWatchQuery, CloudWa
   }
 
   replace(
-    target: string,
-    scopedVars: ScopedVars | undefined,
+    target?: string,
+    scopedVars?: ScopedVars,
     displayErrorIfIsMultiTemplateVariable?: boolean,
     fieldName?: string
   ) {
-    if (displayErrorIfIsMultiTemplateVariable) {
+    if (displayErrorIfIsMultiTemplateVariable && !!target) {
       const variable = this.templateSrv
         .getVariables()
         .find(({ name }) => name === this.templateSrv.getVariableName(target));
@@ -958,6 +959,32 @@ export class CloudWatchDatasource extends DataSourceApi<CloudWatchQuery, CloudWa
       metricsQueries,
     };
   };
+
+  interpolateVariablesInQueries(queries: CloudWatchQuery[], scopedVars: ScopedVars): CloudWatchQuery[] {
+    if (!queries.length) {
+      return queries;
+    }
+
+    return queries.map(query => ({
+      ...query,
+      region: this.getActualRegion(this.replace(query.region, scopedVars)),
+      expression: this.replace(query.expression, scopedVars),
+
+      ...(!isCloudWatchLogsQuery(query) && this.interpolateMetricsQueryVariables(query, scopedVars)),
+    }));
+  }
+
+  interpolateMetricsQueryVariables(
+    query: CloudWatchMetricsQuery,
+    scopedVars: ScopedVars
+  ): Pick<CloudWatchMetricsQuery, 'alias' | 'metricName' | 'namespace' | 'period'> {
+    return {
+      alias: this.replace(query.alias, scopedVars),
+      metricName: this.replace(query.metricName, scopedVars),
+      namespace: this.replace(query.namespace, scopedVars),
+      period: this.replace(query.period, scopedVars),
+    };
+  }
 }
 
 function withTeardown<T = any>(observable: Observable<T>, onUnsubscribe: () => void): Observable<T> {
